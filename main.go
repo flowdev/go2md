@@ -1,78 +1,82 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
-)
-
-type (
-	t1 int
-	t2 string
-	t3 float64
+	"log"
 )
 
 func main() {
-	fname := "./sample.go"
-	if len(os.Args) > 1 {
-		fname = os.Args[1]
+	var flagFile string
+	var flagPackage bool
+	const (
+		usageFile    = "the file to search for flow documentation"
+		usagePackage = "search the whole package for flow documentation"
+	)
+	flag.StringVar(&flagFile, "file", "", usageFile)
+	flag.StringVar(&flagFile, "f", "", usageFile+" (shorthand)")
+	flag.BoolVar(&flagPackage, "package", false, usagePackage)
+	flag.BoolVar(&flagPackage, "p", false, usagePackage+" (shorthand)")
+	flag.Parse()
+
+	if flagFile != "" && flagPackage {
+		log.Fatal("Fatal error: Unable to process a whole package and a single file at the same time.")
 	}
-	// Create the AST by parsing src.
-	fset := token.NewFileSet() // positions are relative to fset
-	fmt.Printf("Parsing file: %s\n", fname)
-	f, err := parser.ParseFile(fset, fname, nil, parser.ParseComments)
-	if err != nil {
-		fmt.Printf("Error parsing file:\n")
-		panic(err)
+	if flagFile == "" && !flagPackage {
+		log.Fatal("Fatal error: Neither a whole package nor a single file is given.")
 	}
 
-	// Create an ast.CommentMap from the ast.File's comments.
-	// This helps keeping the association between comments
-	// and AST nodes.
-	cmap := ast.NewCommentMap(fset, f, f.Comments)
+	fset := token.NewFileSet() // needed for any kind of parsing
+	if flagPackage {
+		fmt.Println("Parsing the whole package.")
+		pkgs, err := parser.ParseDir(fset, ".", nil, parser.ParseComments)
+		if err != nil {
+			log.Fatal("Fatal error: Unable to parse the package: " + err.Error())
+		}
+		for _, pkg := range pkgs {
+			processPackage(pkg)
+		}
+	} else {
+		fmt.Println("Parsing file:", flagFile)
+		f, err := parser.ParseFile(fset, flagFile, nil, parser.ParseComments)
+		if err != nil {
+			log.Fatal("Fatal error: Unable to parse the file: " + err.Error())
+		}
+		processFile(f, flagFile)
+	}
 
-	// Remove the first variable declaration from the list of declarations.
+}
+
+func processPackage(pkg *ast.Package) {
+	for name, f := range pkg.Files {
+		processFile(f, name)
+	}
+}
+func processFile(f *ast.File, fname string) {
+	fmt.Println("Processing file:", fname)
+
+	// Print comments for functions and type declarations.
 	for _, idecl := range f.Decls {
 		fmt.Printf("decl type: %T\n", idecl)
 		switch decl := idecl.(type) {
 		case *ast.FuncDecl:
 			fmt.Printf("Function: %s\n", decl.Name)
 			fmt.Print(decl.Doc.Text())
-			//printComments(cmap[decl])
 			fmt.Println()
 		case *ast.GenDecl:
 			if decl.Tok == token.TYPE {
 				fmt.Println("Type (comment):")
 				fmt.Print(decl.Doc.Text())
-				//printComments(cmap[decl])
 				for _, spec := range decl.Specs {
 					typ := spec.(*ast.TypeSpec)
 					fmt.Printf("Type: %s\n", typ.Name)
-					printComments(cmap[typ])
+					fmt.Print(typ.Doc.Text())
 					fmt.Println()
 				}
 			}
 		}
-	}
-
-	// Use the comment map to filter comments that don't belong anymore
-	// (the comments associated with the variable declaration), and create
-	// the new comments list.
-	//f.Comments = cmap.Filter(f).Comments()
-	/*
-		// Print the modified AST.
-		var buf bytes.Buffer
-		if err := format.Node(&buf, fset, f); err != nil {
-			panic(err)
-		}
-		fmt.Printf("%s", buf.Bytes())
-	*/
-}
-
-func printComments(comments []*ast.CommentGroup) {
-	for _, c := range comments {
-		fmt.Print(c.Text())
 	}
 }
