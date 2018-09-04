@@ -3,10 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"go/ast"
 	"go/parser"
 	"go/token"
 	"log"
+
+	"github.com/flowdev/go2md/goast"
 )
 
 func main() {
@@ -37,7 +38,7 @@ func main() {
 			log.Fatal("Fatal error: Unable to parse the package: " + err.Error())
 		}
 		for _, pkg := range pkgs {
-			processPackage(pkg)
+			goast.ProcessPackage(pkg)
 		}
 	} else {
 		fmt.Println("Parsing file:", flagFile)
@@ -45,38 +46,7 @@ func main() {
 		if err != nil {
 			log.Fatal("Fatal error: Unable to parse the file: " + err.Error())
 		}
-		processFile(f, flagFile)
+		goast.ProcessFile(f, flagFile)
 	}
 
-}
-
-func processPackage(pkg *ast.Package) {
-	for name, f := range pkg.Files {
-		processFile(f, name)
-	}
-}
-func processFile(f *ast.File, fname string) {
-	fmt.Println("Processing file:", fname)
-
-	// Print comments for functions and type declarations.
-	for _, idecl := range f.Decls {
-		fmt.Printf("decl type: %T\n", idecl)
-		switch decl := idecl.(type) {
-		case *ast.FuncDecl:
-			fmt.Printf("Function: %s\n", decl.Name)
-			fmt.Print(decl.Doc.Text())
-			fmt.Println()
-		case *ast.GenDecl:
-			if decl.Tok == token.TYPE {
-				fmt.Println("Type (comment):")
-				fmt.Print(decl.Doc.Text())
-				for _, spec := range decl.Specs {
-					typ := spec.(*ast.TypeSpec)
-					fmt.Printf("Type: %s\n", typ.Name)
-					fmt.Print(typ.Doc.Text())
-					fmt.Println()
-				}
-			}
-		}
-	}
 }

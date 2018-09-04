@@ -5,7 +5,7 @@ import "fmt"
 // Blaer is a thing that can do bla.
 //
 // flow:
-//    in (int)-> [bar1] -> [bar2] -> out
+//     in (int)-> [bar1] -> [bar2] -> out
 type Blaer int
 
 // NewBlaer creates a new *Blaer with the given increment.

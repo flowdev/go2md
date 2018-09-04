@@ -18,7 +18,8 @@ type (
 // Bla is a simple filter.
 //
 // flow:
-//    in (int)-> [foo1] -> [foo2] -> out
+//     in (int)-> [foo1] -> [foo2] -> out
+// Some additional bla, bla.
 func Bla(i int) int {
 	i = foo1(i)
 	i = foo2(i)
