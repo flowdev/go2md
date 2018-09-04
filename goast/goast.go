@@ -122,6 +122,9 @@ func addToMDFile(
 // the flow DSL itself and everything after it in end.
 func ExtractFlowDSL(doc string) (start, flow, end string) {
 	i := strings.Index(doc, flowMarker)
+	if i < 0 {
+		return doc, "", ""
+	}
 	start = doc[:i]
 	fmt.Println("start: >", start, "<")
 	i += len(flowMarker)
