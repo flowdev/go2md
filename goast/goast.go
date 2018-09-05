@@ -125,10 +125,8 @@ func ExtractFlowDSL(doc string) (start, flow, end string) {
 	if i < 0 {
 		return doc, "", ""
 	}
-	start = doc[:i]
-	fmt.Println("start: >", start, "<")
+	start = doc[:i+1]
 	i += len(flowMarker)
-	fmt.Println("flow start: >", doc[i:i+10], "<")
 
 	buf := bytes.Buffer{}
 	for dsl, ok := getDSLLine(doc, &i); ok; dsl, ok = getDSLLine(doc, &i) {
@@ -139,8 +137,6 @@ func ExtractFlowDSL(doc string) (start, flow, end string) {
 	if end != "" && end[len(end)-1:] != "\n" {
 		end += "\n"
 	}
-	fmt.Println("flow: >", buf.String(), "<")
-	fmt.Println("end: >", end, "<")
 	return start, buf.String(), end
 }
 func getDSLLine(doc string, pi *int) (string, bool) {
