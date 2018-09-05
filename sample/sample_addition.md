@@ -2,5 +2,4 @@
 
 ## Flow: Blaer
 Blaer is a thing that can do bla.
-in (int)-> [bar1] -> [bar2] -> out
-
+![Flow: Blaer](./Blaer.svg)

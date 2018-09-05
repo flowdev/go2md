@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/flowdev/gflowparser"
 )
 
 const (
@@ -103,10 +107,20 @@ func addToMDFile(
 		return nil, err
 	}
 	start, flow, end := ExtractFlowDSL(doc)
-	if _, err = f.WriteString(start + "\n"); err != nil {
+	if _, err = f.WriteString(start); err != nil {
 		return nil, err
 	}
-	if _, err = f.WriteString(flow + "\n"); err != nil {
+	svg, info, err := gflowparser.ConvertFlowDSLToSVG(flow, flowname)
+	if err != nil {
+		return nil, err
+	}
+	if info != "" {
+		log.Printf("INFO: %s", info)
+	}
+	if err = ioutil.WriteFile(flowname+".svg", svg, os.FileMode(0666)); err != nil {
+		return nil, err
+	}
+	if _, err = f.WriteString(fmt.Sprintf("![Flow: %s](./%s.svg)\n", flowname, flowname)); err != nil {
 		return nil, err
 	}
 	if _, err = f.WriteString(end); err != nil {

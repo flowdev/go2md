@@ -2,6 +2,5 @@
 
 ## Flow: Bla
 Bla is a simple filter.
-in (int)-> [foo1] -> [foo2] -> out
-
+![Flow: Bla](./Bla.svg)
 Some additional bla, bla.
