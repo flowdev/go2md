@@ -107,7 +107,7 @@ func addToMDFile(
 		return nil, err
 	}
 	start, flow, end := ExtractFlowDSL(doc)
-	if _, err = f.WriteString(start); err != nil {
+	if _, err = f.WriteString(start + "\n"); err != nil {
 		return nil, err
 	}
 	svg, info, err := gflowparser.ConvertFlowDSLToSVG(flow, flowname)
@@ -120,7 +120,7 @@ func addToMDFile(
 	if err = ioutil.WriteFile(flowname+".svg", svg, os.FileMode(0666)); err != nil {
 		return nil, err
 	}
-	if _, err = f.WriteString(fmt.Sprintf("![Flow: %s](./%s.svg)\n", flowname, flowname)); err != nil {
+	if _, err = f.WriteString(fmt.Sprintf("![Flow: %s](./%s.svg)\n\n", flowname, flowname)); err != nil {
 		return nil, err
 	}
 	if _, err = f.WriteString(end); err != nil {
