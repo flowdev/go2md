@@ -12,13 +12,17 @@ import (
 	"strings"
 
 	"github.com/flowdev/gflowparser"
+	"github.com/flowdev/gflowparser/data"
 )
 
 const (
-	flowMarker = "\n\nflow:\n"
-	mdStart    = "# Flow Documentation For File: "
-	flowStart  = "## Flow: "
-	dslMarker  = "    "
+	flowMarker           = "\n\nflow:\n"
+	mdStart              = "# Flow Documentation For File: "
+	flowStart            = "## Flow: "
+	dslMarker            = "    "
+	referenceTableHeader = `Components | Data
+---------- | -----
+`
 )
 
 // ProcessPackage is processing all the files of one Go package.
@@ -110,7 +114,7 @@ func addToMDFile(
 	if _, err = f.WriteString(start + "\n"); err != nil {
 		return nil, err
 	}
-	svg, info, err := gflowparser.ConvertFlowDSLToSVG(flow, flowname)
+	svg, compTypes, dataTypes, info, err := gflowparser.ConvertFlowDSLToSVG(flow, flowname)
 	if err != nil {
 		return nil, err
 	}
@@ -123,11 +127,76 @@ func addToMDFile(
 	if _, err = f.WriteString(fmt.Sprintf("![Flow: %s](./%s.svg)\n\n", flowname, flowname)); err != nil {
 		return nil, err
 	}
+	if err = writeReferences(f, compTypes, dataTypes); err != nil {
+		return nil, err
+	}
 	if _, err = f.WriteString(end); err != nil {
 		return nil, err
 	}
 
 	return f, nil
+}
+
+func writeReferences(f *os.File, compTypes []data.Type, dataTypes []data.Type) error {
+	dataTypes = filterTypes(dataTypes)
+	n := max(len(compTypes), len(dataTypes))
+	if n == 0 {
+		return nil
+	}
+
+	if _, err := f.WriteString(referenceTableHeader); err != nil {
+		return err
+	}
+	for i := 0; i < n; i++ {
+		row := bytes.Buffer{}
+		if i < len(compTypes) {
+			row.WriteString(typeToString(compTypes[i]))
+		}
+		row.WriteString(" | ")
+		if i < len(dataTypes) {
+			row.WriteString(typeToString(dataTypes[i]))
+		}
+		row.WriteRune('\n')
+		if _, err := f.Write(row.Bytes()); err != nil {
+			return err
+		}
+	}
+	if _, err := f.WriteString("\n"); err != nil {
+		return err
+	}
+	return nil
+}
+func filterTypes(types []data.Type) []data.Type {
+	result := make([]data.Type, 0, len(types))
+	for _, t := range types {
+		if t.Package != "" {
+			result = append(result, t)
+			continue
+		}
+		s := t.LocalType
+		if len(s) > 2 && s[:2] == "[]" {
+			s = s[2:]
+		} else if len(s) > 4 && s[:4] == "map[" {
+			continue
+		}
+		switch s {
+		case "bool", "byte", "complex64", "complex128", "float32", "float64",
+			"int", "int8", "int16", "int32", "int64",
+			"rune", "string", "uint", "uint8", "uint16", "uint32", "uint64",
+			"uintptr":
+			continue
+		default:
+			t.LocalType = s
+			result = append(result, t)
+		}
+	}
+	return result
+}
+func typeToString(t data.Type) string {
+	if t.Package != "" {
+		return t.Package + "." + t.LocalType
+	}
+	return t.LocalType
 }
 
 // ExtractFlowDSL extracts the flow DSL from a documentation comment string.
@@ -185,4 +254,11 @@ func endMDFile(f *os.File) error {
 		return nil
 	}
 	return f.Close()
+}
+
+func max(a, b int) int {
+	if a >= b {
+		return a
+	}
+	return b
 }

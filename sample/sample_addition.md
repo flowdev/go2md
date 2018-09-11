@@ -5,3 +5,8 @@ Blaer is a thing that can do bla.
 
 ![Flow: Blaer](./Blaer.svg)
 
+Components | Data
+---------- | -----
+bar1 | 
+bar2 | 
+
