@@ -7,6 +7,7 @@ Bla is a simple filter.
 
 Components | Data
 ---------- | -----
+DoBla | 
 foo1 | 
 foo2 | 
 
