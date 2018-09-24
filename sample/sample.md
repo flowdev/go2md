@@ -7,7 +7,7 @@ Bla is a simple filter.
 
 Components | Data
 ---------- | -----
-DoBla | 
+[DoBla](./sample_addition.go.md#flow-dobla) | 
 foo1 | 
 foo2 | 
 

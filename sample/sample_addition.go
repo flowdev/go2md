@@ -3,9 +3,6 @@ package sample
 import "fmt"
 
 // Blaer is a thing that can do bla.
-//
-// flow:
-//     in (int)-> [bar1] -> [bar2] -> out
 type Blaer int
 
 // NewBlaer creates a new *Blaer with the given increment.
@@ -15,6 +12,9 @@ func NewBlaer(inc int) *Blaer {
 }
 
 // DoBla is the input port of the DoBla operation.
+//
+// flow:
+//     in (int)-> [bar1] -> [bar2] -> out
 func (b *Blaer) DoBla(j int) int {
 	j = bar1(int(*b), j)
 	j = bar2(int(*b), j)

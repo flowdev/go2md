@@ -2,7 +2,7 @@ package sample
 
 import "fmt"
 
-//go:generate ./go2md --package
+//go:generate ./go2md
 
 // Comment for all types.
 type (
@@ -21,8 +21,8 @@ type (
 // Some additional bla, bla.
 func Bla(i int) int {
 	i = foo1(i)
-	b := NewBlaer(3)
-	i = b.DoBla(i)
+	doBla := NewBlaer(3)
+	i = doBla.DoBla(i)
 	i = foo2(i)
 	return i
 }

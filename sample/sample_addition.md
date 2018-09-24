@@ -1,9 +1,9 @@
 # Flow Documentation For File: sample_addition.go
 
-## Flow: Blaer
-Blaer is a thing that can do bla.
+## Flow: DoBla
+DoBla is the input port of the DoBla operation.
 
-![Flow: Blaer](./Blaer.svg)
+![Flow: DoBla](./DoBla.svg)
 
 Components | Data
 ---------- | -----
