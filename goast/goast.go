@@ -71,12 +71,13 @@ func findFlows(
 ) ([]*flowData, error) {
 	var err error
 
+	baseName := goNameToBase(goname)
 	for _, idecl := range astf.Decls {
 		fmt.Printf("decl type: %T\n", idecl)
 		if fdecl, ok := idecl.(*ast.FuncDecl); ok {
 			doc := fdecl.Doc.Text()
 			if strings.Contains(doc, flowMarker) {
-				flows, err = addFlow(flowMap, flows, fileMap, goname, fdecl.Name.Name, doc)
+				flows, err = addFlow(flowMap, flows, fileMap, baseName, fdecl.Name.Name, doc)
 				if err != nil {
 					return flows, err
 				}
@@ -85,25 +86,29 @@ func findFlows(
 	}
 	return flows, nil
 }
+func goNameToBase(goname string) string {
+	ext := filepath.Ext(goname)
+	return goname[:len(goname)-len(ext)]
+}
 
 func addFlow(
 	flowMap map[string]*flowData,
 	flows []*flowData,
 	fileMap map[string]*flowFile,
-	goname string,
+	fileBaseName string,
 	fname, doc string,
 ) ([]*flowData, error) {
 	if i := strings.Index(fname, "_"); i >= 0 {
 		fname = fname[:i] // cut off the port name
 	}
-	file := fileMap[goname]
+	file := fileMap[fileBaseName]
 	if file == nil {
-		osfile, err := startMDFile(goname)
+		osfile, err := startMDFile(fileBaseName)
 		if err != nil {
 			return flows, err
 		}
-		file = &flowFile{name: goname, osfile: osfile}
-		fileMap[goname] = file
+		file = &flowFile{name: fileBaseName, osfile: osfile}
+		fileMap[fileBaseName] = file
 	}
 	flow := &flowData{name: fname, doc: doc, file: file}
 	flows = append(flows, flow)
@@ -112,8 +117,8 @@ func addFlow(
 	return flows, nil
 }
 
-func startMDFile(goname string) (*os.File, error) {
-	mdname := goNameToMD(goname)
+func startMDFile(fileBaseName string) (*os.File, error) {
+	mdname := fileBaseName + ".md"
 	fmt.Println("Opening file:", mdname)
 
 	f, err := os.Create(mdname)
@@ -121,16 +126,11 @@ func startMDFile(goname string) (*os.File, error) {
 		return nil, err
 	}
 
-	if _, err = f.WriteString(mdStart + goname + "\n\n"); err != nil {
+	if _, err = f.WriteString(mdStart + fileBaseName + ".go\n\n"); err != nil {
 		return nil, err
 	}
 
 	return f, nil
-}
-func goNameToMD(goname string) string {
-	ext := filepath.Ext(goname)
-	baseName := goname[:len(goname)-len(ext)]
-	return baseName + ".md"
 }
 
 func processFlow(f *flowData, flowMap map[string]*flowData) error {
