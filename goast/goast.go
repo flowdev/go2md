@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
+	"go/token"
 	"io/ioutil"
 	"log"
 	"os"
@@ -24,37 +25,56 @@ const (
 `
 )
 
-type flowData struct {
-	name string
-	doc  string
-	file *flowFile
+type sourcePartKind int
+
+const (
+	sourcePartUnknown = sourcePartKind(iota)
+	sourcePartFlow
+	sourcePartFunc
+	sourcePartType
+)
+
+type sourcePart struct {
+	kind   sourcePartKind
+	name   string
+	doc    string
+	start  int
+	end    int
+	goFile string
+	mdFile *mdFile
 }
 
-type flowFile struct {
+type mdFile struct {
 	name   string
 	osfile *os.File
 }
 
+const (
+	markerFlow = "fl:"
+	markerFunc = "fu:"
+	markerType = "ty:"
+)
+
 // ProcessPackage is processing all the files of one Go package.
-func ProcessPackage(pkg *ast.Package) {
+func ProcessPackage(pkg *ast.Package, fs *token.FileSet) {
 	fmt.Println("Processing package:", pkg.Name)
-	flowMap := make(map[string]*flowData)
-	flows := make([]*flowData, 0, 128)
-	fileMap := make(map[string]*flowFile)
+	partMap := make(map[string]*sourcePart)
+	flows := make([]*sourcePart, 0, 128)
+	fileMap := make(map[string]*mdFile)
 	var err error
 
 	for name, f := range pkg.Files {
-		if flows, err = findFlows(flowMap, flows, fileMap, f, name); err != nil {
+		if flows, err = findSourceParts(partMap, flows, fileMap, f, fs, name); err != nil {
 			log.Fatalf("Unable to find all flows in package: %v", err)
 		}
 	}
 	fmt.Println("Found", len(flows), "flows.")
 	for _, f := range flows {
-		if err = processFlow(f, flowMap); err != nil {
+		if err = processFlow(f, partMap); err != nil {
 			log.Fatalf("Unable to process all flows in package: %v", err)
 		}
 	}
-	fmt.Println("Processed", len(flowMap), "flows.")
+	fmt.Println("Processed", len(partMap), "flows.")
 	for _, f := range fileMap {
 		if err = endMDFile(f.osfile); err != nil {
 			log.Printf("Error while ending file: %v", err)
@@ -63,23 +83,45 @@ func ProcessPackage(pkg *ast.Package) {
 	fmt.Println("Ended", len(fileMap), "files.")
 }
 
-func findFlows(
-	flowMap map[string]*flowData,
-	flows []*flowData,
-	fileMap map[string]*flowFile,
-	astf *ast.File, goname string,
-) ([]*flowData, error) {
+func findSourceParts(
+	partMap map[string]*sourcePart, flows []*sourcePart, fileMap map[string]*mdFile, astf *ast.File, fs *token.FileSet, goname string,
+) ([]*sourcePart, error) {
 	var err error
-
 	baseName := goNameToBase(goname)
+
+	// astf.Scope is a dead end just use the Decls instead!
 	for _, idecl := range astf.Decls {
 		fmt.Printf("decl type: %T\n", idecl)
-		if fdecl, ok := idecl.(*ast.FuncDecl); ok {
-			doc := fdecl.Doc.Text()
+		switch decl := idecl.(type) {
+		case *ast.FuncDecl:
+			doc := decl.Doc.Text()
+			name := decl.Name.Name
 			if strings.Contains(doc, flowMarker) {
-				flows, err = addFlow(flowMap, flows, fileMap, baseName, fdecl.Name.Name, doc)
+				flows, err = addFlow(partMap, flows, fileMap, baseName, decl.Name.Name, doc)
 				if err != nil {
 					return flows, err
+				}
+			} else {
+				partMap[markerFunc+decl.Name.Name] = &sourcePart{
+					kind:   sourcePartFunc,
+					name:   name,
+					start:  lineFor(decl.Pos(), fs),
+					end:    lineFor(decl.End(), fs),
+					goFile: goname,
+				}
+			}
+		case *ast.GenDecl:
+			if decl.Tok == token.TYPE {
+				for _, s := range decl.Specs {
+					ts := s.(*ast.TypeSpec)
+					name := ts.Name.Name
+					partMap[markerType+name] = &sourcePart{
+						kind:   sourcePartType,
+						name:   name,
+						start:  lineFor(ts.Pos(), fs),
+						end:    lineFor(ts.End(), fs),
+						goFile: goname,
+					}
 				}
 			}
 		}
@@ -90,14 +132,19 @@ func goNameToBase(goname string) string {
 	ext := filepath.Ext(goname)
 	return goname[:len(goname)-len(ext)]
 }
+func lineFor(p token.Pos, fs *token.FileSet) int {
+	if p.IsValid() {
+		pos := fs.PositionFor(p, false)
+		return pos.Line
+	}
+
+	return 0
+}
 
 func addFlow(
-	flowMap map[string]*flowData,
-	flows []*flowData,
-	fileMap map[string]*flowFile,
-	fileBaseName string,
+	flowMap map[string]*sourcePart, flows []*sourcePart, fileMap map[string]*mdFile, fileBaseName string,
 	fname, doc string,
-) ([]*flowData, error) {
+) ([]*sourcePart, error) {
 	if i := strings.Index(fname, "_"); i >= 0 {
 		fname = fname[:i] // cut off the port name
 	}
@@ -107,10 +154,10 @@ func addFlow(
 		if err != nil {
 			return flows, err
 		}
-		file = &flowFile{name: fileBaseName, osfile: osfile}
+		file = &mdFile{name: fileBaseName, osfile: osfile}
 		fileMap[fileBaseName] = file
 	}
-	flow := &flowData{name: fname, doc: doc, file: file}
+	flow := &sourcePart{kind: sourcePartFlow, name: fname, doc: doc, mdFile: file}
 	flows = append(flows, flow)
 	flowMap[fname] = flow
 	fmt.Println("Found", len(flows), "flows.")
@@ -133,18 +180,18 @@ func startMDFile(fileBaseName string) (*os.File, error) {
 	return f, nil
 }
 
-func processFlow(f *flowData, flowMap map[string]*flowData) error {
+func processFlow(f *sourcePart, flowMap map[string]*sourcePart) error {
 	fmt.Println("Processing flow:", f.name)
 	err := addToMDFile(f, flowMap)
 	return err
 }
 
-func addToMDFile(f *flowData, flowMap map[string]*flowData) error {
-	if _, err := f.file.osfile.WriteString(flowStart + f.name + "\n"); err != nil {
+func addToMDFile(f *sourcePart, flowMap map[string]*sourcePart) error {
+	if _, err := f.mdFile.osfile.WriteString(flowStart + f.name + "\n"); err != nil {
 		return err
 	}
 	start, flow, end := ExtractFlowDSL(f.doc)
-	if _, err := f.file.osfile.WriteString(start + "\n"); err != nil {
+	if _, err := f.mdFile.osfile.WriteString(start + "\n"); err != nil {
 		return err
 	}
 	svg, compTypes, dataTypes, info, err := gflowparser.ConvertFlowDSLToSVG(flow, f.name)
@@ -157,13 +204,13 @@ func addToMDFile(f *flowData, flowMap map[string]*flowData) error {
 	if err = ioutil.WriteFile(f.name+".svg", svg, os.FileMode(0666)); err != nil {
 		return err
 	}
-	if _, err = f.file.osfile.WriteString(fmt.Sprintf("![Flow: %s](./%s.svg)\n\n", f.name, f.name)); err != nil {
+	if _, err = f.mdFile.osfile.WriteString(fmt.Sprintf("![Flow: %s](./%s.svg)\n\n", f.name, f.name)); err != nil {
 		return err
 	}
 	if err = writeReferences(f, compTypes, dataTypes, flowMap); err != nil {
 		return err
 	}
-	if _, err = f.file.osfile.WriteString(end); err != nil {
+	if _, err = f.mdFile.osfile.WriteString(end); err != nil {
 		return err
 	}
 
@@ -171,18 +218,16 @@ func addToMDFile(f *flowData, flowMap map[string]*flowData) error {
 }
 
 func writeReferences(
-	f *flowData,
-	compTypes []data.Type,
+	f *sourcePart, compTypes []data.Type,
 	dataTypes []data.Type,
-	flowMap map[string]*flowData,
-) error {
+	flowMap map[string]*sourcePart) error {
 	dataTypes = filterTypes(dataTypes)
 	n := max(len(compTypes), len(dataTypes))
 	if n == 0 {
 		return nil
 	}
 
-	if _, err := f.file.osfile.WriteString(referenceTableHeader); err != nil {
+	if _, err := f.mdFile.osfile.WriteString(referenceTableHeader); err != nil {
 		return err
 	}
 	for i := 0; i < n; i++ {
@@ -195,11 +240,11 @@ func writeReferences(
 			row.WriteString(typeToString(dataTypes[i]))
 		}
 		row.WriteRune('\n')
-		if _, err := f.file.osfile.Write(row.Bytes()); err != nil {
+		if _, err := f.mdFile.osfile.Write(row.Bytes()); err != nil {
 			return err
 		}
 	}
-	if _, err := f.file.osfile.WriteString("\n"); err != nil {
+	if _, err := f.mdFile.osfile.WriteString("\n"); err != nil {
 		return err
 	}
 	return nil
@@ -236,14 +281,14 @@ func typeToString(t data.Type) string {
 	}
 	return t.LocalType
 }
-func addComponentToRow(row *bytes.Buffer, comp data.Type, flowMap map[string]*flowData) {
+func addComponentToRow(row *bytes.Buffer, comp data.Type, flowMap map[string]*sourcePart) {
 	cNam := typeToString(comp)
 	flow := flowMap[cNam]
 	if flow != nil {
 		// [link to Google!](http://google.com)
 		row.WriteString(
 			"[" + cNam + "](" +
-				"./" + flow.file.name + ".md#flow-" +
+				"./" + flow.mdFile.name + ".md#flow-" +
 				strings.ToLower(flow.name) +
 				")")
 	} else {
