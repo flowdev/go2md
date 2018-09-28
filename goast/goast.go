@@ -64,7 +64,12 @@ func ProcessPackage(pkg *ast.Package, fs *token.FileSet) {
 	var err error
 
 	for name, f := range pkg.Files {
-		if flows, err = findSourceParts(partMap, flows, fileMap, f, fs, name); err != nil {
+		if flows, err = findSourceParts(
+			partMap, flows, fileMap,
+			f,
+			name, fs,
+			false,
+		); err != nil {
 			log.Fatalf("Unable to find all flows in package: %v", err)
 		}
 	}
@@ -74,9 +79,9 @@ func ProcessPackage(pkg *ast.Package, fs *token.FileSet) {
 			log.Fatalf("Unable to process all flows in package: %v", err)
 		}
 	}
-	fmt.Println("Processed", len(partMap), "flows.")
+	fmt.Println("Processed flows with ", len(partMap), "souce parts.")
 	for _, f := range fileMap {
-		if err = endMDFile(f.osfile); err != nil {
+		if err = endMDFile(f); err != nil {
 			log.Printf("Error while ending file: %v", err)
 		}
 	}
@@ -84,21 +89,29 @@ func ProcessPackage(pkg *ast.Package, fs *token.FileSet) {
 }
 
 func findSourceParts(
-	partMap map[string]*sourcePart, flows []*sourcePart, fileMap map[string]*mdFile, astf *ast.File, fs *token.FileSet, goname string,
+	partMap map[string]*sourcePart, flows []*sourcePart, fileMap map[string]*mdFile,
+	astf *ast.File,
+	goname string, fs *token.FileSet,
+	shallow bool,
 ) ([]*sourcePart, error) {
 	var err error
 	baseName := goNameToBase(goname)
 
-	// astf.Scope is a dead end just use the Decls instead!
 	for _, idecl := range astf.Decls {
-		fmt.Printf("decl type: %T\n", idecl)
 		switch decl := idecl.(type) {
 		case *ast.FuncDecl:
 			doc := decl.Doc.Text()
 			name := decl.Name.Name
 			if strings.Contains(doc, flowMarker) {
-				flows, err = addFlow(partMap, flows, fileMap, baseName, decl.Name.Name, doc)
-				if err != nil {
+				if flows, err = addFlow(
+					partMap,
+					flows,
+					fileMap,
+					decl.Name.Name,
+					doc,
+					baseName,
+					shallow,
+				); err != nil {
 					return flows, err
 				}
 			} else {
@@ -142,31 +155,35 @@ func lineFor(p token.Pos, fs *token.FileSet) int {
 }
 
 func addFlow(
-	flowMap map[string]*sourcePart, flows []*sourcePart, fileMap map[string]*mdFile, fileBaseName string,
-	fname, doc string,
+	partMap map[string]*sourcePart, flows []*sourcePart, fileMap map[string]*mdFile,
+	flowName, doc string,
+	fileBaseName string,
+	shallow bool,
 ) ([]*sourcePart, error) {
-	if i := strings.Index(fname, "_"); i >= 0 {
-		fname = fname[:i] // cut off the port name
+	if i := strings.Index(flowName, "_"); i >= 0 {
+		flowName = flowName[:i] // cut off the port name
 	}
 	file := fileMap[fileBaseName]
 	if file == nil {
-		osfile, err := startMDFile(fileBaseName)
-		if err != nil {
-			return flows, err
+		if shallow {
+			file = &mdFile{name: fileBaseName}
+		} else {
+			osfile, err := startMDFile(fileBaseName)
+			if err != nil {
+				return flows, err
+			}
+			file = &mdFile{name: fileBaseName, osfile: osfile}
 		}
-		file = &mdFile{name: fileBaseName, osfile: osfile}
 		fileMap[fileBaseName] = file
 	}
-	flow := &sourcePart{kind: sourcePartFlow, name: fname, doc: doc, mdFile: file}
+	flow := &sourcePart{kind: sourcePartFlow, name: flowName, doc: doc, mdFile: file}
 	flows = append(flows, flow)
-	flowMap[fname] = flow
-	fmt.Println("Found", len(flows), "flows.")
+	partMap[markerFlow+flowName] = flow
 	return flows, nil
 }
 
 func startMDFile(fileBaseName string) (*os.File, error) {
 	mdname := fileBaseName + ".md"
-	fmt.Println("Opening file:", mdname)
 
 	f, err := os.Create(mdname)
 	if err != nil {
@@ -180,13 +197,13 @@ func startMDFile(fileBaseName string) (*os.File, error) {
 	return f, nil
 }
 
-func processFlow(f *sourcePart, flowMap map[string]*sourcePart) error {
+func processFlow(f *sourcePart, partMap map[string]*sourcePart) error {
 	fmt.Println("Processing flow:", f.name)
-	err := addToMDFile(f, flowMap)
+	err := addToMDFile(f, partMap)
 	return err
 }
 
-func addToMDFile(f *sourcePart, flowMap map[string]*sourcePart) error {
+func addToMDFile(f *sourcePart, partMap map[string]*sourcePart) error {
 	if _, err := f.mdFile.osfile.WriteString(flowStart + f.name + "\n"); err != nil {
 		return err
 	}
@@ -207,7 +224,7 @@ func addToMDFile(f *sourcePart, flowMap map[string]*sourcePart) error {
 	if _, err = f.mdFile.osfile.WriteString(fmt.Sprintf("![Flow: %s](./%s.svg)\n\n", f.name, f.name)); err != nil {
 		return err
 	}
-	if err = writeReferences(f, compTypes, dataTypes, flowMap); err != nil {
+	if err = writeReferences(f, compTypes, dataTypes, partMap); err != nil {
 		return err
 	}
 	if _, err = f.mdFile.osfile.WriteString(end); err != nil {
@@ -220,7 +237,7 @@ func addToMDFile(f *sourcePart, flowMap map[string]*sourcePart) error {
 func writeReferences(
 	f *sourcePart, compTypes []data.Type,
 	dataTypes []data.Type,
-	flowMap map[string]*sourcePart) error {
+	partMap map[string]*sourcePart) error {
 	dataTypes = filterTypes(dataTypes)
 	n := max(len(compTypes), len(dataTypes))
 	if n == 0 {
@@ -233,7 +250,7 @@ func writeReferences(
 	for i := 0; i < n; i++ {
 		row := bytes.Buffer{}
 		if i < len(compTypes) {
-			addComponentToRow(&row, compTypes[i], flowMap)
+			addComponentToRow(&row, compTypes[i], partMap)
 		}
 		row.WriteString(" | ")
 		if i < len(dataTypes) {
@@ -281,9 +298,10 @@ func typeToString(t data.Type) string {
 	}
 	return t.LocalType
 }
-func addComponentToRow(row *bytes.Buffer, comp data.Type, flowMap map[string]*sourcePart) {
+func addComponentToRow(row *bytes.Buffer, comp data.Type, partMap map[string]*sourcePart) {
 	cNam := typeToString(comp)
-	flow := flowMap[cNam]
+	flow := partMap[markerFlow+cNam]
+	fun := partMap[markerFunc+cNam]
 	if flow != nil {
 		// [link to Google!](http://google.com)
 		row.WriteString(
@@ -291,6 +309,11 @@ func addComponentToRow(row *bytes.Buffer, comp data.Type, flowMap map[string]*so
 				"./" + flow.mdFile.name + ".md#flow-" +
 				strings.ToLower(flow.name) +
 				")")
+	} else if fun != nil {
+		row.WriteString(fmt.Sprintf(
+			"[%s](./%s#L%d)",
+			cNam, fun.goFile, fun.start,
+		))
 	} else {
 		row.WriteString(cNam)
 	}
@@ -346,11 +369,11 @@ func getDSLLine(doc string, pi *int) (string, bool) {
 	return "", false
 }
 
-func endMDFile(f *os.File) error {
-	if f == nil {
+func endMDFile(f *mdFile) error {
+	if f == nil || f.osfile == nil {
 		return nil
 	}
-	return f.Close()
+	return f.osfile.Close()
 }
 
 func max(a, b int) int {
