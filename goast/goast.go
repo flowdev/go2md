@@ -311,8 +311,8 @@ func addComponentToRow(row *bytes.Buffer, comp data.Type, partMap map[string]*so
 				")")
 	} else if fun != nil {
 		row.WriteString(fmt.Sprintf(
-			"[%s](./%s#L%d)",
-			cNam, fun.goFile, fun.start,
+			"[%s](./%s#L%dL%d)",
+			cNam, fun.goFile, fun.start, fun.end,
 		))
 	} else {
 		row.WriteString(cNam)
