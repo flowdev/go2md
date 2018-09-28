@@ -237,7 +237,8 @@ func addToMDFile(f *sourcePart, partMap map[string]*sourcePart) error {
 func writeReferences(
 	f *sourcePart, compTypes []data.Type,
 	dataTypes []data.Type,
-	partMap map[string]*sourcePart) error {
+	partMap map[string]*sourcePart,
+) error {
 	dataTypes = filterTypes(dataTypes)
 	n := max(len(compTypes), len(dataTypes))
 	if n == 0 {
@@ -254,7 +255,7 @@ func writeReferences(
 		}
 		row.WriteString(" | ")
 		if i < len(dataTypes) {
-			row.WriteString(typeToString(dataTypes[i]))
+			addTypeToRow(&row, dataTypes[i], partMap)
 		}
 		row.WriteRune('\n')
 		if _, err := f.mdFile.osfile.Write(row.Bytes()); err != nil {
@@ -316,6 +317,19 @@ func addComponentToRow(row *bytes.Buffer, comp data.Type, partMap map[string]*so
 		))
 	} else {
 		row.WriteString(cNam)
+	}
+}
+func addTypeToRow(row *bytes.Buffer, typ data.Type, partMap map[string]*sourcePart) {
+	tNam := typeToString(typ)
+	ty := partMap[markerType+tNam]
+
+	if ty != nil {
+		row.WriteString(fmt.Sprintf(
+			"[%s](./%s#L%dL%d)",
+			tNam, ty.goFile, ty.start, ty.end,
+		))
+	} else {
+		row.WriteString(tNam)
 	}
 }
 
