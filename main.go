@@ -1,22 +1,31 @@
 package main
 
 import (
-	"fmt"
-	"go/parser"
-	"go/token"
 	"log"
 
 	"github.com/flowdev/go2md/goast"
 )
 
 func main() {
-	fset := token.NewFileSet() // needed for any kind of parsing
-	fmt.Println("Parsing the whole directory.")
-	pkgs, err := parser.ParseDir(fset, ".", nil, parser.ParseComments)
-	if err != nil {
-		log.Fatal("Fatal error: Unable to parse the package: " + err.Error())
+	if err := goast.ProcessDir("."); err != nil {
+		log.Printf("FATAL: Unable to process current directory: %v", err)
 	}
-	for _, pkg := range pkgs { // iterate over subpackages (e.g.: xxx and xxx_test)
-		goast.ProcessPackage(pkg, fset)
-	}
+}
+
+func findGoPath() string {
+	// call 'go env GOPATH'
+	// shall we support multiple paths?
+	return ""
+}
+func findGoMod() string {
+	// call 'go env GOMOD'
+	return ""
+}
+func findVendor(goMod string) string {
+	// crawl up directory structure or goMod
+	return ""
+}
+func findGoRoot() string {
+	// call 'go env GOROOT'
+	return ""
 }

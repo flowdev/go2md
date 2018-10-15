@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
+	"go/parser"
 	"go/token"
 	"io/ioutil"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -23,6 +25,7 @@ const (
 	referenceTableHeader = `Components | Data
 ---------- | -----
 `
+	goTestFileName = `_test.go`
 )
 
 type sourcePartKind int
@@ -55,46 +58,192 @@ const (
 	markerType = "ty:"
 )
 
-// ProcessPackage is processing all the files of one Go package.
-func ProcessPackage(pkg *ast.Package, fs *token.FileSet) {
-	fmt.Println("Processing package:", pkg.Name)
+//
+// packageDict is a simple dictionary of all known packages/paths and
+// their source parts.
+//
+
+type goPackage struct {
+	path    string
+	partMap map[string]*sourcePart
+}
+
+type packageDict struct {
+	packs map[string]*goPackage
+}
+
+func newPackageDict() *packageDict {
+	return &packageDict{
+		packs: make(map[string]*goPackage),
+	}
+}
+
+func (pd *packageDict) addPackage(path string, partMap map[string]*sourcePart) {
+	pd.packs[path] = &goPackage{path: path, partMap: partMap}
+}
+func (pd *packageDict) getPartFor(path string, markedName string) *sourcePart {
+	goPack := pd.packs[path]
+	if goPack == nil {
+		return nil
+	}
+	return goPack.partMap[markedName]
+}
+
+//
+// fileImps
+//
+
+type fileImps struct {
+	imps     map[string]string // maps local package name (without '.') to import path
+	packDict *packageDict
+	fset     *token.FileSet
+}
+
+func newFileImps(
+	astImps []*ast.ImportSpec,
+	packDict *packageDict,
+	fset *token.FileSet,
+) *fileImps {
+	imps := make(map[string]string)
+	for _, astImp := range astImps {
+		key := ""
+		val := astImp.Path.Value
+		if astImp.Name == nil {
+			key = path.Base(val)
+		} else {
+			key = strings.TrimRight(astImp.Name.Name, ".")
+		}
+		if key != "_" && key != "" && key != "." && key != "/" { // ignore funny imports
+			imps[key] = val
+		}
+	}
+	return &fileImps{imps: imps, packDict: packDict}
+}
+func (fi *fileImps) getPartFor(pack string, markedName string) *sourcePart {
+	path := fi.imps[pack]
+	if path == "" {
+		return nil
+	}
+	part := fi.packDict.getPartFor(path, markedName)
+	if part != nil {
+		return part
+	}
+	partMap := fi.findPartsForPath(path)
+	if partMap != nil {
+		fi.packDict.addPackage(path, partMap)
+	}
+	return partMap[markedName]
+}
+func (fi *fileImps) findPartsForPath(path string) map[string]*sourcePart {
+	dir := path
+	if path[0] != '.' {
+		// TODO: Find right directory
+	}
+	pkgs, err := parser.ParseDir(fi.fset, dir, excludeTests, parser.ParseComments)
+	if err != nil {
+		log.Printf("ERROR: Unable to parse additional directory '%s': %v", dir, err)
+		return nil
+	}
+	partMap := make(map[string]*sourcePart)
+	flows := make([]*sourcePart, 0, 128)
+	for _, pkg := range pkgs { // iterate over subpackages (e.g.: xxx and xxx_test)
+		if len(pkg.Name) >= 5 && pkg.Name[len(pkg.Name)-5:] == "_test" {
+			continue
+		}
+		for name, astf := range pkg.Files {
+			if flows, err = findSourceParts(
+				partMap, flows,
+				astf,
+				name, fi.fset,
+			); err != nil {
+				log.Printf(
+					"ERROR: Unable to find all source parts in directory '%s': %v",
+					dir, err)
+			}
+		}
+	}
+	return partMap
+}
+
+//
+// Parse and process the main directory/package.
+//
+
+func excludeTests(fi os.FileInfo) bool {
+	nam := strings.ToLower(fi.Name())
+	return !fi.IsDir() &&
+		(len(nam) < len(goTestFileName) ||
+			nam[len(nam)-len(goTestFileName):] != goTestFileName)
+}
+
+// ProcessDir processes the whole given directory
+func ProcessDir(dir string) error {
+	fset := token.NewFileSet() // needed for any kind of parsing
+	fmt.Println("Parsing the whole directory:", dir)
+	pkgs, err := parser.ParseDir(fset, dir, excludeTests, parser.ParseComments)
+	if err != nil {
+		return fmt.Errorf("unable to parse the directory '%s': %v", dir, err)
+	}
+	for _, pkg := range pkgs { // iterate over subpackages (e.g.: xxx and xxx_test)
+		if len(pkg.Name) >= 5 && pkg.Name[len(pkg.Name)-5:] == "_test" {
+			continue
+		}
+		processPackage(pkg, fset)
+	}
+	return nil
+}
+
+// processPackage is processing all the files of one Go package.
+func processPackage(pkg *ast.Package, fset *token.FileSet) error {
+	fmt.Println("processing package:", pkg.Name)
 	partMap := make(map[string]*sourcePart)
 	flows := make([]*sourcePart, 0, 128)
 	fileMap := make(map[string]*mdFile)
+	//packDict := newPackageDict()
+	_ = newPackageDict()
 	var err error
 
-	for name, f := range pkg.Files {
+	for name, astf := range pkg.Files {
 		if flows, err = findSourceParts(
-			partMap, flows, fileMap,
-			f,
-			name, fs,
-			false,
+			partMap, flows,
+			astf,
+			name, fset,
 		); err != nil {
-			log.Fatalf("Unable to find all flows in package: %v", err)
+			return fmt.Errorf(
+				"unable to find all flows in package (%s): %v", pkg.Name, err)
 		}
 	}
 	fmt.Println("Found", len(flows), "flows.")
 	for _, f := range flows {
-		if err = processFlow(f, partMap); err != nil {
-			log.Fatalf("Unable to process all flows in package: %v", err)
+		if err = startFlowFile(f, fileMap); err != nil {
+			return fmt.Errorf(
+				"unable to start all Markdown files in package (%s): %v",
+				pkg.Name, err)
+		}
+		if err = addToMDFile(f, partMap); err != nil {
+			return fmt.Errorf(
+				"unable to process all flows in package (%s): %v", pkg.Name, err)
 		}
 	}
-	fmt.Println("Processed flows with ", len(partMap), "souce parts.")
+	fmt.Println("processed flows with ", len(partMap), "souce parts.")
 	for _, f := range fileMap {
 		if err = endMDFile(f); err != nil {
 			log.Printf("Error while ending file: %v", err)
 		}
 	}
 	fmt.Println("Ended", len(fileMap), "files.")
+	return nil
 }
 
+//
+// Handle source file
+//
+
 func findSourceParts(
-	partMap map[string]*sourcePart, flows []*sourcePart, fileMap map[string]*mdFile,
+	partMap map[string]*sourcePart, flows []*sourcePart,
 	astf *ast.File,
-	goname string, fs *token.FileSet,
-	shallow bool,
+	goname string, fset *token.FileSet,
 ) ([]*sourcePart, error) {
-	var err error
 	baseName := goNameToBase(goname)
 
 	for _, idecl := range astf.Decls {
@@ -103,23 +252,25 @@ func findSourceParts(
 			doc := decl.Doc.Text()
 			name := decl.Name.Name
 			if strings.Contains(doc, flowMarker) {
-				if flows, err = addFlow(
-					partMap,
-					flows,
-					fileMap,
-					decl.Name.Name,
-					doc,
-					baseName,
-					shallow,
-				); err != nil {
-					return flows, err
+				if i := strings.Index(name, "_"); i >= 0 {
+					name = name[:i] // cut off the port name
 				}
+				flow := &sourcePart{
+					kind:   sourcePartFlow,
+					name:   name,
+					doc:    doc,
+					start:  lineFor(decl.Pos(), fset),
+					end:    lineFor(decl.End(), fset),
+					mdFile: &mdFile{name: baseName},
+				}
+				partMap[markerFlow+name] = flow
+				flows = append(flows, flow)
 			} else {
 				partMap[markerFunc+decl.Name.Name] = &sourcePart{
 					kind:   sourcePartFunc,
 					name:   name,
-					start:  lineFor(decl.Pos(), fs),
-					end:    lineFor(decl.End(), fs),
+					start:  lineFor(decl.Pos(), fset),
+					end:    lineFor(decl.End(), fset),
 					goFile: goname,
 				}
 			}
@@ -131,8 +282,8 @@ func findSourceParts(
 					partMap[markerType+name] = &sourcePart{
 						kind:   sourcePartType,
 						name:   name,
-						start:  lineFor(ts.Pos(), fs),
-						end:    lineFor(ts.End(), fs),
+						start:  lineFor(ts.Pos(), fset),
+						end:    lineFor(ts.End(), fset),
 						goFile: goname,
 					}
 				}
@@ -145,41 +296,31 @@ func goNameToBase(goname string) string {
 	ext := filepath.Ext(goname)
 	return goname[:len(goname)-len(ext)]
 }
-func lineFor(p token.Pos, fs *token.FileSet) int {
+func lineFor(p token.Pos, fset *token.FileSet) int {
 	if p.IsValid() {
-		pos := fs.PositionFor(p, false)
+		pos := fset.PositionFor(p, false)
 		return pos.Line
 	}
 
 	return 0
 }
 
-func addFlow(
-	partMap map[string]*sourcePart, flows []*sourcePart, fileMap map[string]*mdFile,
-	flowName, doc string,
-	fileBaseName string,
-	shallow bool,
-) ([]*sourcePart, error) {
-	if i := strings.Index(flowName, "_"); i >= 0 {
-		flowName = flowName[:i] // cut off the port name
-	}
-	file := fileMap[fileBaseName]
+//
+// Write to Markdown file
+//
+
+func startFlowFile(flow *sourcePart, fileMap map[string]*mdFile) error {
+	file := fileMap[flow.mdFile.name]
 	if file == nil {
-		if shallow {
-			file = &mdFile{name: fileBaseName}
-		} else {
-			osfile, err := startMDFile(fileBaseName)
-			if err != nil {
-				return flows, err
-			}
-			file = &mdFile{name: fileBaseName, osfile: osfile}
+		osfile, err := startMDFile(flow.mdFile.name)
+		if err != nil {
+			return err
 		}
-		fileMap[fileBaseName] = file
+		file = &mdFile{name: flow.mdFile.name, osfile: osfile}
+		fileMap[flow.mdFile.name] = file
 	}
-	flow := &sourcePart{kind: sourcePartFlow, name: flowName, doc: doc, mdFile: file}
-	flows = append(flows, flow)
-	partMap[markerFlow+flowName] = flow
-	return flows, nil
+	flow.mdFile = file
+	return nil
 }
 
 func startMDFile(fileBaseName string) (*os.File, error) {
@@ -197,13 +338,8 @@ func startMDFile(fileBaseName string) (*os.File, error) {
 	return f, nil
 }
 
-func processFlow(f *sourcePart, partMap map[string]*sourcePart) error {
-	fmt.Println("Processing flow:", f.name)
-	err := addToMDFile(f, partMap)
-	return err
-}
-
 func addToMDFile(f *sourcePart, partMap map[string]*sourcePart) error {
+	fmt.Println("processing flow:", f.name)
 	if _, err := f.mdFile.osfile.WriteString(flowStart + f.name + "\n"); err != nil {
 		return err
 	}
