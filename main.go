@@ -13,16 +13,24 @@ import (
 
 func main() {
 	// find all the possible roots for Go source code in the right order:
-	fmt.Println("vendor:", findVendor())
-	fmt.Println("gopath(s):", findGoPaths())
-	fmt.Println("goroot:", findGoRoot())
+	srcRoots := make([]string, 0, 4)
+	vendorRoot := findVendorRoot()
+	if vendorRoot != "" {
+		srcRoots = append(srcRoots, vendorRoot)
+	}
+	srcRoots = append(srcRoots, findGoPathRoots()...)
+	goRootRoot := findGoRootRoot()
+	if goRootRoot != "" {
+		srcRoots = append(srcRoots, goRootRoot)
+	}
+	fmt.Println("srcRoots:", srcRoots)
 	if err := goast.ProcessDir("."); err != nil {
 		log.Printf("FATAL: Unable to process current directory: %v", err)
 	}
 }
 
-// findGoPaths finds all paths of GOPATH and turns them into source roots.
-func findGoPaths() []string {
+// findGoPathRoots finds all paths of GOPATH and turns them into source roots.
+func findGoPathRoots() []string {
 	gopath := getOutputOfCmd("go", "env", "GOPATH")
 	gopaths := filepath.SplitList(gopath)
 	srcRoots := make([]string, len(gopaths))
@@ -31,10 +39,10 @@ func findGoPaths() []string {
 	}
 	return srcRoots
 }
-func findVendor() string {
+func findVendorRoot() string {
 	return crawlUpDirsAndFind("vendor", ".")
 }
-func findGoRoot() string {
+func findGoRootRoot() string {
 	return filepath.Join(getOutputOfCmd("go", "env", "GOROOT"), "src")
 }
 
@@ -55,8 +63,7 @@ func crawlUpDirsAndFind(file, startDir string) string {
 
 	for ; absDir != volName && absDir != oldDir; absDir = filepath.Dir(absDir) {
 		path := filepath.Join(absDir, file)
-		_, err := os.Lstat(path)
-		if err == nil {
+		if _, err = os.Stat(path); err == nil {
 			return path
 		}
 		oldDir = absDir
