@@ -12,7 +12,16 @@ import (
 )
 
 func main() {
-	// find all the possible roots for Go source code in the right order:
+	srcRoots := findSourceRoots()
+	fmt.Println("srcRoots:", srcRoots)
+	if err := goast.ProcessDir(".", goast.NewPackageDict(srcRoots)); err != nil {
+		log.Printf("FATAL: Unable to process current directory: %v", err)
+	}
+}
+
+// findSourceRoots finds all the possible roots for Go source code in the right
+// order.
+func findSourceRoots() []string {
 	srcRoots := make([]string, 0, 4)
 	vendorRoot := findVendorRoot()
 	if vendorRoot != "" {
@@ -23,10 +32,7 @@ func main() {
 	if goRootRoot != "" {
 		srcRoots = append(srcRoots, goRootRoot)
 	}
-	fmt.Println("srcRoots:", srcRoots)
-	if err := goast.ProcessDir("."); err != nil {
-		log.Printf("FATAL: Unable to process current directory: %v", err)
-	}
+	return srcRoots
 }
 
 // findGoPathRoots finds all paths of GOPATH and turns them into source roots.

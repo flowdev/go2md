@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/flowdev/gflowparser"
@@ -69,12 +70,15 @@ type goPackage struct {
 }
 
 type packageDict struct {
-	packs map[string]*goPackage
+	packs    map[string]*goPackage
+	srcRoots []string
 }
 
-func newPackageDict() *packageDict {
+// NewPackageDict creates a new dictionary for packages
+func NewPackageDict(srcRoots []string) *packageDict {
 	return &packageDict{
-		packs: make(map[string]*goPackage),
+		packs:    make(map[string]*goPackage),
+		srcRoots: srcRoots,
 	}
 }
 
@@ -136,8 +140,18 @@ func (fi *fileImps) getPartFor(pack string, markedName string) *sourcePart {
 }
 func (fi *fileImps) findPartsForPath(path string) map[string]*sourcePart {
 	dir := path
-	if path[0] != '.' {
-		// TODO: Find right directory
+	if dir[0] != '.' {
+		for _, baseDir := range fi.packDict.srcRoots {
+			absDir := filepath.Join(baseDir, dir)
+			finfo, err := os.Stat(absDir)
+			if err != nil {
+				continue
+			}
+			if finfo.IsDir() {
+				dir = absDir
+				break
+			}
+		}
 	}
 	pkgs, err := parser.ParseDir(fi.fset, dir, excludeTests, parser.ParseComments)
 	if err != nil {
@@ -177,7 +191,7 @@ func excludeTests(fi os.FileInfo) bool {
 }
 
 // ProcessDir processes the whole given directory
-func ProcessDir(dir string) error {
+func ProcessDir(dir string, packDict *packageDict) error {
 	fset := token.NewFileSet() // needed for any kind of parsing
 	fmt.Println("Parsing the whole directory:", dir)
 	pkgs, err := parser.ParseDir(fset, dir, excludeTests, parser.ParseComments)
@@ -199,8 +213,6 @@ func processPackage(pkg *ast.Package, fset *token.FileSet) error {
 	partMap := make(map[string]*sourcePart)
 	flows := make([]*sourcePart, 0, 128)
 	fileMap := make(map[string]*mdFile)
-	//packDict := newPackageDict()
-	_ = newPackageDict()
 	var err error
 
 	for name, astf := range pkg.Files {
@@ -376,6 +388,9 @@ func writeReferences(
 	partMap map[string]*sourcePart,
 ) error {
 	dataTypes = filterTypes(dataTypes)
+	dataTypes = sortTypes(dataTypes)
+	compTypes = sortTypes(compTypes)
+
 	n := max(len(compTypes), len(dataTypes))
 	if n == 0 {
 		return nil
@@ -402,6 +417,15 @@ func writeReferences(
 		return err
 	}
 	return nil
+}
+func sortTypes(types []data.Type) []data.Type {
+	sort.Slice(types, func(i, j int) bool {
+		if types[i].Package == types[j].Package {
+			return types[i].LocalType < types[j].LocalType
+		}
+		return types[i].Package < types[j].Package
+	})
+	return types
 }
 func filterTypes(types []data.Type) []data.Type {
 	result := make([]data.Type, 0, len(types))
