@@ -50,6 +50,7 @@ type sourcePart struct {
 
 type mdFile struct {
 	name   string
+	fImps  *fileImps
 	osfile *os.File
 }
 
@@ -111,9 +112,9 @@ func newFileImps(
 	imps := make(map[string]string)
 	for _, astImp := range astImps {
 		key := ""
-		val := astImp.Path.Value
+		val := strings.Trim(astImp.Path.Value, "\"")
 		if astImp.Name == nil {
-			key = path.Base(val)
+			key = strings.Trim(path.Base(val), "\"")
 		} else {
 			key = strings.TrimRight(astImp.Name.Name, ".")
 		}
@@ -121,7 +122,7 @@ func newFileImps(
 			imps[key] = val
 		}
 	}
-	return &fileImps{imps: imps, packDict: packDict}
+	return &fileImps{imps: imps, packDict: packDict, fset: fset}
 }
 func (fi *fileImps) getPartFor(pack string, markedName string) *sourcePart {
 	path := fi.imps[pack]
@@ -202,13 +203,13 @@ func ProcessDir(dir string, packDict *packageDict) error {
 		if len(pkg.Name) >= 5 && pkg.Name[len(pkg.Name)-5:] == "_test" {
 			continue
 		}
-		processPackage(pkg, fset)
+		processPackage(pkg, fset, packDict)
 	}
 	return nil
 }
 
 // processPackage is processing all the files of one Go package.
-func processPackage(pkg *ast.Package, fset *token.FileSet) error {
+func processPackage(pkg *ast.Package, fset *token.FileSet, packDict *packageDict) error {
 	fmt.Println("processing package:", pkg.Name)
 	partMap := make(map[string]*sourcePart)
 	flows := make([]*sourcePart, 0, 128)
@@ -216,6 +217,9 @@ func processPackage(pkg *ast.Package, fset *token.FileSet) error {
 	var err error
 
 	for name, astf := range pkg.Files {
+		fImps := newFileImps(astf.Imports, packDict, fset)
+		baseName := goNameToBase(name)
+		fileMap[baseName] = &mdFile{name: baseName, fImps: fImps}
 		if flows, err = findSourceParts(
 			partMap, flows,
 			astf,
@@ -324,12 +328,14 @@ func lineFor(p token.Pos, fset *token.FileSet) int {
 func startFlowFile(flow *sourcePart, fileMap map[string]*mdFile) error {
 	file := fileMap[flow.mdFile.name]
 	if file == nil {
+		return fmt.Errorf("missing flow file: " + flow.mdFile.name)
+	}
+	if file.osfile == nil {
 		osfile, err := startMDFile(flow.mdFile.name)
 		if err != nil {
 			return err
 		}
-		file = &mdFile{name: flow.mdFile.name, osfile: osfile}
-		fileMap[flow.mdFile.name] = file
+		file.osfile = osfile
 	}
 	flow.mdFile = file
 	return nil
@@ -402,11 +408,11 @@ func writeReferences(
 	for i := 0; i < n; i++ {
 		row := bytes.Buffer{}
 		if i < len(compTypes) {
-			addComponentToRow(&row, compTypes[i], partMap)
+			addComponentToRow(&row, compTypes[i], partMap, f.mdFile.fImps)
 		}
 		row.WriteString(" | ")
 		if i < len(dataTypes) {
-			addTypeToRow(&row, dataTypes[i], partMap)
+			addTypeToRow(&row, dataTypes[i], partMap, f.mdFile.fImps)
 		}
 		row.WriteRune('\n')
 		if _, err := f.mdFile.osfile.Write(row.Bytes()); err != nil {
@@ -459,10 +465,17 @@ func typeToString(t data.Type) string {
 	}
 	return t.LocalType
 }
-func addComponentToRow(row *bytes.Buffer, comp data.Type, partMap map[string]*sourcePart) {
+func addComponentToRow(row *bytes.Buffer, comp data.Type, partMap map[string]*sourcePart, fImps *fileImps) {
+	var flow, fun *sourcePart
 	cNam := typeToString(comp)
-	flow := partMap[markerFlow+cNam]
-	fun := partMap[markerFunc+cNam]
+
+	if comp.Package == "" {
+		flow = partMap[markerFlow+cNam]
+		fun = partMap[markerFunc+cNam]
+	} else {
+		flow = fImps.getPartFor(comp.Package, markerFlow+comp.LocalType)
+		fun = fImps.getPartFor(comp.Package, markerFunc+comp.LocalType)
+	}
 	if flow != nil {
 		// [link to Google!](http://google.com)
 		row.WriteString(
@@ -472,20 +485,25 @@ func addComponentToRow(row *bytes.Buffer, comp data.Type, partMap map[string]*so
 				")")
 	} else if fun != nil {
 		row.WriteString(fmt.Sprintf(
-			"[%s](./%s#L%dL%d)",
+			"[%s](%s#L%dL%d)",
 			cNam, fun.goFile, fun.start, fun.end,
 		))
 	} else {
 		row.WriteString(cNam)
 	}
 }
-func addTypeToRow(row *bytes.Buffer, typ data.Type, partMap map[string]*sourcePart) {
+func addTypeToRow(row *bytes.Buffer, typ data.Type, partMap map[string]*sourcePart, fImps *fileImps) {
+	var ty *sourcePart
 	tNam := typeToString(typ)
-	ty := partMap[markerType+tNam]
+	if typ.Package == "" {
+		ty = partMap[markerType+tNam]
+	} else {
+		ty = fImps.getPartFor(typ.Package, markerType+typ.LocalType)
+	}
 
 	if ty != nil {
 		row.WriteString(fmt.Sprintf(
-			"[%s](./%s#L%dL%d)",
+			"[%s](%s#L%dL%d)",
 			tNam, ty.goFile, ty.start, ty.end,
 		))
 	} else {
