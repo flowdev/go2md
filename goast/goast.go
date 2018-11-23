@@ -39,13 +39,14 @@ const (
 )
 
 type sourcePart struct {
-	kind   sourcePartKind
-	name   string
-	doc    string
-	start  int
-	end    int
-	goFile string
-	mdFile *mdFile
+	kind       sourcePartKind
+	name       string
+	doc        string
+	start      int
+	end        int
+	importPath string
+	goFile     string
+	mdFile     *mdFile
 }
 
 type mdFile struct {
@@ -174,7 +175,7 @@ func (fi *fileImps) findPartsForPath(path string) map[string]*sourcePart {
 			if flows, err = findSourceParts(
 				partMap, flows,
 				astf,
-				name, fi.fset,
+				name, path, fi.fset,
 			); err != nil {
 				log.Printf(
 					"ERROR: Unable to find all source parts in directory '%s': %v",
@@ -233,7 +234,7 @@ func processPackage(pkg *ast.Package, fset *token.FileSet, packDict *packageDict
 		if flows, err = findSourceParts(
 			partMap, flows,
 			astf,
-			name, fset,
+			name, "", fset,
 		); err != nil {
 			return fmt.Errorf(
 				"unable to find all flows in package (%s): %v", pkg.Name, err)
@@ -268,7 +269,7 @@ func processPackage(pkg *ast.Package, fset *token.FileSet, packDict *packageDict
 func findSourceParts(
 	partMap map[string]*sourcePart, flows []*sourcePart,
 	astf *ast.File,
-	goname string, fset *token.FileSet,
+	goname string, path string, fset *token.FileSet,
 ) ([]*sourcePart, error) {
 	baseName := goNameToBase(goname)
 
@@ -282,22 +283,24 @@ func findSourceParts(
 					name = name[:i] // cut off the port name
 				}
 				flow := &sourcePart{
-					kind:   sourcePartFlow,
-					name:   name,
-					doc:    doc,
-					start:  lineFor(decl.Pos(), fset),
-					end:    lineFor(decl.End(), fset),
-					mdFile: &mdFile{name: baseName},
+					kind:       sourcePartFlow,
+					name:       name,
+					doc:        doc,
+					start:      lineFor(decl.Pos(), fset),
+					end:        lineFor(decl.End(), fset),
+					importPath: path,
+					mdFile:     &mdFile{name: baseName},
 				}
 				partMap[markerFlow+name] = flow
 				flows = append(flows, flow)
 			} else {
 				partMap[markerFunc+decl.Name.Name] = &sourcePart{
-					kind:   sourcePartFunc,
-					name:   name,
-					start:  lineFor(decl.Pos(), fset),
-					end:    lineFor(decl.End(), fset),
-					goFile: goname,
+					kind:       sourcePartFunc,
+					name:       name,
+					start:      lineFor(decl.Pos(), fset),
+					end:        lineFor(decl.End(), fset),
+					importPath: path,
+					goFile:     goname,
 				}
 			}
 		case *ast.GenDecl:
@@ -306,11 +309,12 @@ func findSourceParts(
 					ts := s.(*ast.TypeSpec)
 					name := ts.Name.Name
 					partMap[markerType+name] = &sourcePart{
-						kind:   sourcePartType,
-						name:   name,
-						start:  lineFor(ts.Pos(), fset),
-						end:    lineFor(ts.End(), fset),
-						goFile: goname,
+						kind:       sourcePartType,
+						name:       name,
+						start:      lineFor(ts.Pos(), fset),
+						end:        lineFor(ts.End(), fset),
+						importPath: path,
+						goFile:     goname,
 					}
 				}
 			}
@@ -546,20 +550,29 @@ func fileNameFor(part *sourcePart, marker string, mdFile *mdFile) (string, error
 	return outsideFileNameFor(part.goFile, part, mdFile)
 }
 func outsideFileNameFor(name string, part *sourcePart, mdFile *mdFile) (string, error) {
-	fmt.Println("DEBUG: Joining CWD =", mdFile.fImps.packDict.cwd, "with name =", name)
-	absF := filepath.Join(mdFile.fImps.packDict.cwd, name)
+	absF := name
+	if !filepath.IsAbs(absF) {
+		absF = filepath.Join(mdFile.fImps.packDict.cwd, name)
+	}
 	relF, err := filepath.Rel(mdFile.fImps.packDict.projRoot, absF)
 	if err != nil {
 		return "", err
 	}
-	if len(relF) > 3 && relF[:3] == ".."+string(filepath.Separator) { // outside of project
-		if mdFile.fImps.packDict.localLinks {
-			return absF, nil
-		}
-		fmt.Println("DEBUG: Should compute URL from: goFile =", part.goFile, ", mdFile =", part.mdFile.name)
-		return "https://" + name, nil
+	if !strings.HasPrefix(relF, ".."+string(filepath.Separator)) {
+		return filepath.Rel(mdFile.fImps.packDict.cwd, absF) // inside of project always use relative paths
 	}
-	return filepath.Rel(mdFile.fImps.packDict.cwd, absF) // inside of project always use relative paths
+	// outside of project:
+	if mdFile.fImps.packDict.localLinks {
+		return absF, nil
+	}
+	_, lastF := filepath.Split(absF)
+	urlParts := strings.SplitN(part.importPath, "/", 4)
+	fmt.Println("DEBUG: urlParts =", urlParts)
+	url := "https://" + path.Join(urlParts[:3]...) + "/blob/master"
+	if len(urlParts) > 3 {
+		url += "/" + urlParts[3]
+	}
+	return url + "/" + lastF, nil
 }
 
 // ExtractFlowDSL extracts the flow DSL from a documentation comment string.
