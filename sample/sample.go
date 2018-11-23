@@ -17,14 +17,12 @@ type (
 // Bla is a simple filter.
 //
 // flow:
-//     in (Tint1)-> [foo1] (TBlaer)-> [DoBla] (Tint1)-> [foo2] -> out
+//     in (Tint1)-> [foo1] -> [BlaSome] -> [foo2] -> out
 // Some additional bla, bla.
 func Bla(i Tint1) Tint1 {
 	i = foo1(i)
-	doBla := NewBlaer(3)
-	i = Tint1(doBla.DoBla(TBlaer(i)))
-	i = foo2(i)
-	return i
+	i = BlaSome(i)
+	return foo2(i)
 }
 
 func foo1(i Tint1) Tint1 {
@@ -35,4 +33,20 @@ func foo1(i Tint1) Tint1 {
 func foo2(i Tint1) Tint1 {
 	fmt.Println("i2:", i)
 	return i + 2
+}
+
+// BlaSome is a simple filter.
+//
+// flow:
+//     in (Tint1)-> [foo3] (TBlaer)-> [DoBla] -> out
+// Some additional ...
+func BlaSome(i Tint1) Tint1 {
+	i = foo3(i)
+	doBla := NewBlaer(4)
+	return Tint1(doBla.DoBla(TBlaer(i)))
+}
+
+func foo3(i Tint1) Tint1 {
+	fmt.Println("i3:", i)
+	return i + 3
 }

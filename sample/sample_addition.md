@@ -7,6 +7,6 @@ DoBla is the input port of the DoBla operation.
 
 Components | Data
 ---------- | -----
-[bar1](./sample_addition.go#L26L29) | [TBlaer](./sample_addition.go#L5L5)
-[bar2](./sample_addition.go#L31L34) | 
+[bar1](sample/sample_addition.go#L26L29) | [TBlaer](sample/sample_addition.go#L5L5)
+[bar2](sample/sample_addition.go#L31L34) | 
 

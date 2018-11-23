@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -11,10 +12,25 @@ import (
 	"github.com/flowdev/go2md/goast"
 )
 
+var localLinks bool
+
+func init() {
+	const (
+		localLinksDefault = false
+		localLinksUsage   = "create links to local files in markdown"
+	)
+	flag.BoolVar(&localLinks, "local", localLinksDefault, localLinksUsage)
+	flag.BoolVar(&localLinks, "l", localLinksDefault, localLinksUsage+" (shorthand)")
+}
+
 func main() {
+	flag.Parse()
 	srcRoots := findSourceRoots()
+	projRoot := getOutputOfCmd("git", "rev-parse", "--show-toplevel")
 	fmt.Println("srcRoots:", srcRoots)
-	if err := goast.ProcessDir(".", goast.NewPackageDict(srcRoots)); err != nil {
+	fmt.Println("localLinks:", localLinks)
+	fmt.Println("projRoot:", projRoot)
+	if err := goast.ProcessDir(".", goast.NewPackageDict(srcRoots, projRoot, localLinks)); err != nil {
 		log.Printf("FATAL: Unable to process current directory: %v", err)
 	}
 }

@@ -71,15 +71,19 @@ type goPackage struct {
 }
 
 type packageDict struct {
-	packs    map[string]*goPackage
-	srcRoots []string
+	packs      map[string]*goPackage
+	srcRoots   []string
+	projRoot   string
+	localLinks bool
 }
 
 // NewPackageDict creates a new dictionary for packages
-func NewPackageDict(srcRoots []string) *packageDict {
+func NewPackageDict(srcRoots []string, projRoot string, localLinks bool) *packageDict {
 	return &packageDict{
-		packs:    make(map[string]*goPackage),
-		srcRoots: srcRoots,
+		packs:      make(map[string]*goPackage),
+		srcRoots:   srcRoots,
+		projRoot:   projRoot,
+		localLinks: localLinks,
 	}
 }
 
@@ -477,16 +481,26 @@ func addComponentToRow(row *bytes.Buffer, comp data.Type, partMap map[string]*so
 		fun = fImps.getPartFor(comp.Package, markerFunc+comp.LocalType)
 	}
 	if flow != nil {
+		fileName, err := fileNameFor(flow, markerFlow, fImps)
+		if err != nil {
+			fmt.Println("WARNING: Unable to compute correct URL for flow", cNam, ":", err)
+			fileName = flow.mdFile.name + ".md"
+		}
 		// [link to Google!](http://google.com)
 		row.WriteString(
 			"[" + cNam + "](" +
-				"./" + flow.mdFile.name + ".md#flow-" +
+				fileName + "#flow-" +
 				strings.ToLower(flow.name) +
 				")")
 	} else if fun != nil {
+		fileName, err := fileNameFor(fun, markerFunc, fImps)
+		if err != nil {
+			fmt.Println("WARNING: Unable to compute correct URL for function", cNam, ":", err)
+			fileName = fun.goFile
+		}
 		row.WriteString(fmt.Sprintf(
 			"[%s](%s#L%dL%d)",
-			cNam, fun.goFile, fun.start, fun.end,
+			cNam, fileName, fun.start, fun.end,
 		))
 	} else {
 		row.WriteString(cNam)
@@ -502,13 +516,46 @@ func addTypeToRow(row *bytes.Buffer, typ data.Type, partMap map[string]*sourcePa
 	}
 
 	if ty != nil {
+		fileName, err := fileNameFor(ty, markerType, fImps)
+		if err != nil {
+			fmt.Println("WARNING: Unable to compute correct URL for type", tNam, ":", err)
+			fileName = ty.goFile
+		}
 		row.WriteString(fmt.Sprintf(
 			"[%s](%s#L%dL%d)",
-			tNam, ty.goFile, ty.start, ty.end,
+			tNam, fileName, ty.start, ty.end,
 		))
 	} else {
 		row.WriteString(tNam)
 	}
+}
+func fileNameFor(part *sourcePart, marker string, fImps *fileImps) (string, error) {
+	if marker == markerFlow {
+		if part.goFile == "" {
+			return "", nil
+		}
+		return outsideFileNameFor(part.mdFile.name+".md", part, fImps)
+	}
+
+	return outsideFileNameFor(part.goFile, part, fImps)
+}
+func outsideFileNameFor(name string, part *sourcePart, fImps *fileImps) (string, error) {
+	absF, err := filepath.Abs(name)
+	if err != nil {
+		return "", err
+	}
+	relF, err := filepath.Rel(fImps.packDict.projRoot, absF)
+	if err != nil {
+		return "", err
+	}
+	if len(relF) > 3 && relF[:3] == ".."+string(filepath.Separator) { // outside of project
+		if fImps.packDict.localLinks {
+			return absF, nil
+		}
+		fmt.Println("DEBUG: Should compute URL from: goFile =", part.goFile, ", mdFile =", part.mdFile.name)
+		return "https://" + name, nil
+	}
+	return relF, nil // inside of project always use relative paths
 }
 
 // ExtractFlowDSL extracts the flow DSL from a documentation comment string.
