@@ -74,6 +74,7 @@ type packageDict struct {
 	packs      map[string]*goPackage
 	srcRoots   []string
 	projRoot   string
+	cwd        string
 	localLinks bool
 }
 
@@ -197,6 +198,11 @@ func excludeTests(fi os.FileInfo) bool {
 
 // ProcessDir processes the whole given directory
 func ProcessDir(dir string, packDict *packageDict) error {
+	cwd, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("unable to get working directory '%s': %v", dir, err)
+	}
+	packDict.cwd = cwd
 	fset := token.NewFileSet() // needed for any kind of parsing
 	fmt.Println("Parsing the whole directory:", dir)
 	pkgs, err := parser.ParseDir(fset, dir, excludeTests, parser.ParseComments)
@@ -412,11 +418,11 @@ func writeReferences(
 	for i := 0; i < n; i++ {
 		row := bytes.Buffer{}
 		if i < len(compTypes) {
-			addComponentToRow(&row, compTypes[i], partMap, f.mdFile.fImps)
+			addComponentToRow(&row, compTypes[i], partMap, f.mdFile)
 		}
 		row.WriteString(" | ")
 		if i < len(dataTypes) {
-			addTypeToRow(&row, dataTypes[i], partMap, f.mdFile.fImps)
+			addTypeToRow(&row, dataTypes[i], partMap, f.mdFile)
 		}
 		row.WriteRune('\n')
 		if _, err := f.mdFile.osfile.Write(row.Bytes()); err != nil {
@@ -469,7 +475,7 @@ func typeToString(t data.Type) string {
 	}
 	return t.LocalType
 }
-func addComponentToRow(row *bytes.Buffer, comp data.Type, partMap map[string]*sourcePart, fImps *fileImps) {
+func addComponentToRow(row *bytes.Buffer, comp data.Type, partMap map[string]*sourcePart, mdFile *mdFile) {
 	var flow, fun *sourcePart
 	cNam := typeToString(comp)
 
@@ -477,11 +483,11 @@ func addComponentToRow(row *bytes.Buffer, comp data.Type, partMap map[string]*so
 		flow = partMap[markerFlow+cNam]
 		fun = partMap[markerFunc+cNam]
 	} else {
-		flow = fImps.getPartFor(comp.Package, markerFlow+comp.LocalType)
-		fun = fImps.getPartFor(comp.Package, markerFunc+comp.LocalType)
+		flow = mdFile.fImps.getPartFor(comp.Package, markerFlow+comp.LocalType)
+		fun = mdFile.fImps.getPartFor(comp.Package, markerFunc+comp.LocalType)
 	}
 	if flow != nil {
-		fileName, err := fileNameFor(flow, markerFlow, fImps)
+		fileName, err := fileNameFor(flow, markerFlow, mdFile)
 		if err != nil {
 			fmt.Println("WARNING: Unable to compute correct URL for flow", cNam, ":", err)
 			fileName = flow.mdFile.name + ".md"
@@ -493,7 +499,7 @@ func addComponentToRow(row *bytes.Buffer, comp data.Type, partMap map[string]*so
 				strings.ToLower(flow.name) +
 				")")
 	} else if fun != nil {
-		fileName, err := fileNameFor(fun, markerFunc, fImps)
+		fileName, err := fileNameFor(fun, markerFunc, mdFile)
 		if err != nil {
 			fmt.Println("WARNING: Unable to compute correct URL for function", cNam, ":", err)
 			fileName = fun.goFile
@@ -506,17 +512,17 @@ func addComponentToRow(row *bytes.Buffer, comp data.Type, partMap map[string]*so
 		row.WriteString(cNam)
 	}
 }
-func addTypeToRow(row *bytes.Buffer, typ data.Type, partMap map[string]*sourcePart, fImps *fileImps) {
+func addTypeToRow(row *bytes.Buffer, typ data.Type, partMap map[string]*sourcePart, mdFile *mdFile) {
 	var ty *sourcePart
 	tNam := typeToString(typ)
 	if typ.Package == "" {
 		ty = partMap[markerType+tNam]
 	} else {
-		ty = fImps.getPartFor(typ.Package, markerType+typ.LocalType)
+		ty = mdFile.fImps.getPartFor(typ.Package, markerType+typ.LocalType)
 	}
 
 	if ty != nil {
-		fileName, err := fileNameFor(ty, markerType, fImps)
+		fileName, err := fileNameFor(ty, markerType, mdFile)
 		if err != nil {
 			fmt.Println("WARNING: Unable to compute correct URL for type", tNam, ":", err)
 			fileName = ty.goFile
@@ -529,33 +535,31 @@ func addTypeToRow(row *bytes.Buffer, typ data.Type, partMap map[string]*sourcePa
 		row.WriteString(tNam)
 	}
 }
-func fileNameFor(part *sourcePart, marker string, fImps *fileImps) (string, error) {
+func fileNameFor(part *sourcePart, marker string, mdFile *mdFile) (string, error) {
 	if marker == markerFlow {
-		if part.goFile == "" {
+		if mdFile.name == part.mdFile.name { // same MD file
 			return "", nil
 		}
-		return outsideFileNameFor(part.mdFile.name+".md", part, fImps)
+		return outsideFileNameFor(part.mdFile.name+".md", part, mdFile)
 	}
 
-	return outsideFileNameFor(part.goFile, part, fImps)
+	return outsideFileNameFor(part.goFile, part, mdFile)
 }
-func outsideFileNameFor(name string, part *sourcePart, fImps *fileImps) (string, error) {
-	absF, err := filepath.Abs(name)
-	if err != nil {
-		return "", err
-	}
-	relF, err := filepath.Rel(fImps.packDict.projRoot, absF)
+func outsideFileNameFor(name string, part *sourcePart, mdFile *mdFile) (string, error) {
+	fmt.Println("DEBUG: Joining CWD =", mdFile.fImps.packDict.cwd, "with name =", name)
+	absF := filepath.Join(mdFile.fImps.packDict.cwd, name)
+	relF, err := filepath.Rel(mdFile.fImps.packDict.projRoot, absF)
 	if err != nil {
 		return "", err
 	}
 	if len(relF) > 3 && relF[:3] == ".."+string(filepath.Separator) { // outside of project
-		if fImps.packDict.localLinks {
+		if mdFile.fImps.packDict.localLinks {
 			return absF, nil
 		}
 		fmt.Println("DEBUG: Should compute URL from: goFile =", part.goFile, ", mdFile =", part.mdFile.name)
 		return "https://" + name, nil
 	}
-	return relF, nil // inside of project always use relative paths
+	return filepath.Rel(mdFile.fImps.packDict.cwd, absF) // inside of project always use relative paths
 }
 
 // ExtractFlowDSL extracts the flow DSL from a documentation comment string.
