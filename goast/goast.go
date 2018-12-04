@@ -410,8 +410,9 @@ func writeReferences(
 	dataTypes = filterTypes(dataTypes)
 	dataTypes = sortTypes(dataTypes)
 	compTypes = sortTypes(compTypes)
+	dataLinks := getLinksForTypes(dataTypes, partMap, f.mdFile)
 
-	n := max(len(compTypes), len(dataTypes))
+	n := max(len(compTypes), len(dataLinks))
 	if n == 0 {
 		return nil
 	}
@@ -425,8 +426,8 @@ func writeReferences(
 			addComponentToRow(&row, compTypes[i], partMap, f.mdFile)
 		}
 		row.WriteString(" | ")
-		if i < len(dataTypes) {
-			addTypeToRow(&row, dataTypes[i], partMap, f.mdFile)
+		if i < len(dataLinks) {
+			addTypeToRow(&row, dataLinks[i])
 		}
 		row.WriteRune('\n')
 		if _, err := f.mdFile.osfile.Write(row.Bytes()); err != nil {
@@ -455,9 +456,9 @@ func filterTypes(types []data.Type) []data.Type {
 			continue
 		}
 		s := t.LocalType
-		if len(s) > 2 && s[:2] == "[]" {
+		if strings.HasPrefix(s, "[]") {
 			s = s[2:]
-		} else if len(s) > 4 && s[:4] == "map[" {
+		} else if strings.HasPrefix(s, "map[") {
 			continue
 		}
 		switch s {
@@ -472,6 +473,16 @@ func filterTypes(types []data.Type) []data.Type {
 		}
 	}
 	return result
+}
+func getLinksForTypes(types []data.Type, partMap map[string]*sourcePart, mdFile *mdFile) []string {
+	links := make([]string, 0, len(types))
+	for _, typ := range types {
+		link := getLinkForType(typ, partMap, mdFile)
+		if link != "" {
+			links = append(links, link)
+		}
+	}
+	return links
 }
 func typeToString(t data.Type) string {
 	if t.Package != "" {
@@ -516,7 +527,10 @@ func addComponentToRow(row *bytes.Buffer, comp data.Type, partMap map[string]*so
 		row.WriteString(cNam)
 	}
 }
-func addTypeToRow(row *bytes.Buffer, typ data.Type, partMap map[string]*sourcePart, mdFile *mdFile) {
+func addTypeToRow(row *bytes.Buffer, tNam string) {
+	row.WriteString(tNam)
+}
+func getLinkForType(typ data.Type, partMap map[string]*sourcePart, mdFile *mdFile) string {
 	var ty *sourcePart
 	tNam := typeToString(typ)
 	if typ.Package == "" {
@@ -524,20 +538,19 @@ func addTypeToRow(row *bytes.Buffer, typ data.Type, partMap map[string]*sourcePa
 	} else {
 		ty = mdFile.fImps.getPartFor(typ.Package, markerType+typ.LocalType)
 	}
-
-	if ty != nil {
-		fileName, err := fileNameFor(ty, markerType, mdFile)
-		if err != nil {
-			fmt.Println("WARNING: Unable to compute correct URL for type", tNam, ":", err)
-			fileName = ty.goFile
-		}
-		row.WriteString(fmt.Sprintf(
-			"[%s](%s#L%dL%d)",
-			tNam, fileName, ty.start, ty.end,
-		))
-	} else {
-		row.WriteString(tNam)
+	if ty == nil {
+		return ""
 	}
+
+	fileName, err := fileNameFor(ty, markerType, mdFile)
+	if err != nil {
+		fmt.Println("WARNING: Unable to compute correct URL for type", tNam, ":", err)
+		fileName = ty.goFile
+	}
+	return fmt.Sprintf(
+		"[%s](%s#L%dL%d)",
+		tNam, fileName, ty.start, ty.end,
+	)
 }
 func fileNameFor(part *sourcePart, marker string, mdFile *mdFile) (string, error) {
 	if marker == markerFlow {
