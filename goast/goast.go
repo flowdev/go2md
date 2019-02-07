@@ -214,7 +214,9 @@ func ProcessDir(dir string, packDict *packageDict) error {
 		if len(pkg.Name) >= 5 && pkg.Name[len(pkg.Name)-5:] == "_test" {
 			continue
 		}
-		processPackage(pkg, fset, packDict)
+		if err := processPackage(pkg, fset, packDict); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -379,6 +381,7 @@ func addToMDFile(f *sourcePart, partMap map[string]*sourcePart) error {
 	if _, err := f.mdFile.osfile.WriteString(start + "\n"); err != nil {
 		return err
 	}
+	log.Printf("Converting FlowDSL: '%s'\n", flow)
 	svg, compTypes, dataTypes, info, err := gflowparser.ConvertFlowDSLToSVG(flow, f.name)
 	if err != nil {
 		return err

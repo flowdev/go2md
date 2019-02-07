@@ -78,7 +78,7 @@ func getOutputOfCmd(cmd string, args ...string) string {
 func crawlUpDirsAndFind(file, startDir string) string {
 	absDir, err := filepath.Abs(startDir)
 	if err != nil {
-		log.Fatalf("FATAL: Unable to find absolute directory: %v", err)
+		log.Fatalf("FATAL: Unable to find absolute directory (for %s): %v", startDir, err)
 	}
 	volName := filepath.VolumeName(absDir)
 	oldDir := "" // set to impossible value first!
