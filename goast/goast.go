@@ -21,7 +21,7 @@ import (
 const (
 	flowMarker           = "\n\nflow:\n"
 	mdStart              = "# Flow Documentation For File: "
-	flowStart            = "## Flow: "
+	flowStart            = "\n## Flow: [%s](%s#L%dL%d)\n"
 	dslMarker            = "    "
 	referenceTableHeader = `Components | Data
 ---------- | -----
@@ -291,6 +291,7 @@ func findSourceParts(
 					start:      lineFor(decl.Pos(), fset),
 					end:        lineFor(decl.End(), fset),
 					importPath: path,
+					goFile:     goname,
 					mdFile:     &mdFile{name: baseName},
 				}
 				partMap[markerFlow+name] = flow
@@ -374,7 +375,9 @@ func startMDFile(fileBaseName string) (*os.File, error) {
 
 func addToMDFile(f *sourcePart, partMap map[string]*sourcePart) error {
 	fmt.Println("processing flow:", f.name)
-	if _, err := f.mdFile.osfile.WriteString(flowStart + f.name + "\n"); err != nil {
+	if _, err := f.mdFile.osfile.WriteString(
+		fmt.Sprintf(flowStart, f.name, f.goFile, f.start, f.end)); err != nil {
+
 		return err
 	}
 	start, flow, end := ExtractFlowDSL(f.doc)
@@ -392,7 +395,9 @@ func addToMDFile(f *sourcePart, partMap map[string]*sourcePart) error {
 	if err = ioutil.WriteFile(f.name+".svg", svg, os.FileMode(0666)); err != nil {
 		return err
 	}
-	if _, err = f.mdFile.osfile.WriteString(fmt.Sprintf("![Flow: %s](./%s.svg)\n\n", f.name, f.name)); err != nil {
+	if _, err = f.mdFile.osfile.WriteString(
+		fmt.Sprintf("![Flow: %s](./%s.svg)\n\n", f.name, f.name)); err != nil {
+
 		return err
 	}
 	if err = writeReferences(f, compTypes, dataTypes, partMap); err != nil {

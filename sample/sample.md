@@ -1,6 +1,7 @@
 # Flow Documentation For File: sample.go
 
-## Flow: Bla
+
+## Flow: [Bla](sample.go#L22L26)
 Bla is a simple filter.
 
 ![Flow: Bla](./Bla.svg)
@@ -12,7 +13,8 @@ Components | Data
 [foo2](sample.go#L33L36) | 
 
 Some additional bla, bla.
-## Flow: BlaSome
+
+## Flow: [BlaSome](sample.go#L43L47)
 BlaSome is a simple filter.
 
 ![Flow: BlaSome](./BlaSome.svg)

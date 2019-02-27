@@ -1,6 +1,7 @@
 # Flow Documentation For File: sample_addition.go
 
-## Flow: DoBla
+
+## Flow: [DoBla](sample_addition.go#L20L24)
 DoBla is the input port of the DoBla operation.
 
 ![Flow: DoBla](./DoBla.svg)
