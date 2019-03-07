@@ -588,7 +588,6 @@ func outsideFileNameFor(name string, part *sourcePart, mdFile *mdFile) (string, 
 	}
 	_, lastF := filepath.Split(absF)
 	urlParts := strings.SplitN(part.importPath, "/", 4)
-	fmt.Println("DEBUG: urlParts =", urlParts)
 	url := "https://" + path.Join(urlParts[:3]...) + "/blob/master"
 	if len(urlParts) > 3 {
 		url += "/" + urlParts[3]
