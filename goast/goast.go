@@ -27,6 +27,7 @@ const (
 ---------- | -----
 `
 	goTestFileName = `_test.go`
+	goTestPackName = `_test`
 )
 
 type sourcePartKind int
@@ -168,7 +169,7 @@ func (fi *fileImps) findPartsForPath(path string) map[string]*sourcePart {
 	partMap := make(map[string]*sourcePart)
 	flows := make([]*sourcePart, 0, 128)
 	for _, pkg := range pkgs { // iterate over subpackages (e.g.: xxx and xxx_test)
-		if len(pkg.Name) >= 5 && pkg.Name[len(pkg.Name)-5:] == "_test" {
+		if isTestPackage(pkg.Name) {
 			continue
 		}
 		for name, astf := range pkg.Files {
@@ -186,6 +187,13 @@ func (fi *fileImps) findPartsForPath(path string) map[string]*sourcePart {
 	return partMap
 }
 
+func isTestPackage(name string) bool {
+	if len(name) >= len(goTestPackName) && name[len(name)-len(goTestPackName):] == goTestPackName {
+		return true
+	}
+	return false
+}
+
 //
 // Parse and process the main directory/package.
 //
@@ -201,17 +209,17 @@ func excludeTests(fi os.FileInfo) bool {
 func ProcessDir(dir string, packDict *packageDict) error {
 	cwd, err := filepath.Abs(dir)
 	if err != nil {
-		return fmt.Errorf("unable to get working directory '%s': %v", dir, err)
+		return fmt.Errorf("unable to get working directory '%s': %w", dir, err)
 	}
 	packDict.cwd = cwd
 	fset := token.NewFileSet() // needed for any kind of parsing
 	fmt.Println("Parsing the whole directory:", dir)
 	pkgs, err := parser.ParseDir(fset, dir, excludeTests, parser.ParseComments)
 	if err != nil {
-		return fmt.Errorf("unable to parse the directory '%s': %v", dir, err)
+		return fmt.Errorf("unable to parse the directory '%s': %w", dir, err)
 	}
 	for _, pkg := range pkgs { // iterate over subpackages (e.g.: xxx and xxx_test)
-		if len(pkg.Name) >= 5 && pkg.Name[len(pkg.Name)-5:] == "_test" {
+		if isTestPackage(pkg.Name) {
 			continue
 		}
 		if err := processPackage(pkg, fset, packDict); err != nil {
@@ -239,19 +247,19 @@ func processPackage(pkg *ast.Package, fset *token.FileSet, packDict *packageDict
 			name, "", fset,
 		); err != nil {
 			return fmt.Errorf(
-				"unable to find all flows in package (%s): %v", pkg.Name, err)
+				"unable to find all flows in package (%s): %w", pkg.Name, err)
 		}
 	}
 	fmt.Println("Found", len(flows), "flows.")
 	for _, f := range flows {
 		if err = startFlowFile(f, fileMap); err != nil {
 			return fmt.Errorf(
-				"unable to start all Markdown files in package (%s): %v",
+				"unable to start all Markdown files in package (%s): %w",
 				pkg.Name, err)
 		}
 		if err = addToMDFile(f, partMap); err != nil {
 			return fmt.Errorf(
-				"unable to process all flows in package (%s): %v", pkg.Name, err)
+				"unable to process all flows in package (%s): %w", pkg.Name, err)
 		}
 	}
 	fmt.Println("processed flows with ", len(partMap), "souce parts.")
